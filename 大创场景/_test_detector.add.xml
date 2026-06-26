@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<additional>
+    <laneAreaDetector id="e2_E0" lanes="E0_0" pos="0" endPos="500" period="60" file="e2_E0.out.xml"/>
+    <laneAreaDetector id="e2_E0_l1" lanes="E0_1" pos="0" endPos="500" period="60" file="e2_E0.out.xml"/>
+    <laneAreaDetector id="e2_E0_l2" lanes="E0_2" pos="0" endPos="500" period="60" file="e2_E0.out.xml"/>
+</additional>

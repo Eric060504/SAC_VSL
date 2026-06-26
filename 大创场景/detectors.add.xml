@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<additional xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/additional_file.xsd">
+
+    <!-- ============================================================
+         E2 Lane-Area Detectors (laneAreaDetector)
+         Purpose: Collect per-lane traffic state data
+         Period: 60s (matching the RL control interval)
+         Each detector covers one lane — SUMO 1.26 requires lanes
+         to be defined individually for laneAreaDetector
+         ============================================================ -->
+
+    <!-- E0: upstream edge (500m), 120km/h zone — 3 lanes -->
+    <laneAreaDetector id="e2_E0_0" lane="E0_0" pos="0" endPos="500" period="60" file="e2_E0.out.xml"/>
+    <laneAreaDetector id="e2_E0_1" lane="E0_1" pos="0" endPos="500" period="60" file="e2_E0.out.xml"/>
+    <laneAreaDetector id="e2_E0_2" lane="E0_2" pos="0" endPos="500" period="60" file="e2_E0.out.xml"/>
+
+    <!-- E1: work zone approach (500m), 80km/h, CONTROL EDGE — 3 lanes -->
+    <laneAreaDetector id="e2_E1_0" lane="E1_0" pos="0" endPos="500" period="60" file="e2_E1.out.xml"/>
+    <laneAreaDetector id="e2_E1_1" lane="E1_1" pos="0" endPos="500" period="60" file="e2_E1.out.xml"/>
+    <laneAreaDetector id="e2_E1_2" lane="E1_2" pos="0" endPos="500" period="60" file="e2_E1.out.xml"/>
+
+    <!-- E2: work zone (500m), 80km/h, CONTROL EDGE — 3 lanes -->
+    <laneAreaDetector id="e2_E2_0" lane="E2_0" pos="0" endPos="500" period="60" file="e2_E2.out.xml"/>
+    <laneAreaDetector id="e2_E2_1" lane="E2_1" pos="0" endPos="500" period="60" file="e2_E2.out.xml"/>
+    <laneAreaDetector id="e2_E2_2" lane="E2_2" pos="0" endPos="500" period="60" file="e2_E2.out.xml"/>
+
+    <!-- E3: work zone (500m), 80km/h, CONTROL EDGE — 3 lanes -->
+    <laneAreaDetector id="e2_E3_0" lane="E3_0" pos="0" endPos="500" period="60" file="e2_E3.out.xml"/>
+    <laneAreaDetector id="e2_E3_1" lane="E3_1" pos="0" endPos="500" period="60" file="e2_E3.out.xml"/>
+    <laneAreaDetector id="e2_E3_2" lane="E3_2" pos="0" endPos="500" period="60" file="e2_E3.out.xml"/>
+
+    <!-- E4: work zone downstream (200m), 80km/h — 3 lanes -->
+    <laneAreaDetector id="e2_E4_0" lane="E4_0" pos="0" endPos="200" period="60" file="e2_E4.out.xml"/>
+    <laneAreaDetector id="e2_E4_1" lane="E4_1" pos="0" endPos="200" period="60" file="e2_E4.out.xml"/>
+    <laneAreaDetector id="e2_E4_2" lane="E4_2" pos="0" endPos="200" period="60" file="e2_E4.out.xml"/>
+
+    <!-- E5: near exit (300m), 80km/h — 3 lanes -->
+    <laneAreaDetector id="e2_E5_0" lane="E5_0" pos="0" endPos="300" period="60" file="e2_E5.out.xml"/>
+    <laneAreaDetector id="e2_E5_1" lane="E5_1" pos="0" endPos="300" period="60" file="e2_E5.out.xml"/>
+    <laneAreaDetector id="e2_E5_2" lane="E5_2" pos="0" endPos="300" period="60" file="e2_E5.out.xml"/>
+
+    <!-- ============================================================
+         E3 Multi-Entry-Exit Detector (entryExitDetector)
+         Purpose: Measure travel time from E1 entry to E5 exit
+         Region: E1 pos=0 → E5 pos=end (2000m total)
+         Period: 60s
+         openEntry="true": includes vehicles already inside at start
+         timeThreshold: high value to avoid premature discard
+         ============================================================ -->
+
+    <entryExitDetector id="e3_tt_e1_e5" period="60" file="e3_tt_e1_e5.out.xml"
+                       openEntry="true" timeThreshold="3600" speedThreshold="2.0">
+        <!-- Entry points: E1 start (all 3 lanes) -->
+        <detEntry lane="E1_0" pos="0"/>
+        <detEntry lane="E1_1" pos="0"/>
+        <detEntry lane="E1_2" pos="0"/>
+        <!-- Exit points: E5 end (all 3 lanes) -->
+        <detExit lane="E5_0" pos="300"/>
+        <detExit lane="E5_1" pos="300"/>
+        <detExit lane="E5_2" pos="300"/>
+    </entryExitDetector>
+
+</additional>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>     
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- 车辆类型：纯 CAV 场景（含 20% CAV 大车），IDM 跟驰，略偏温和 -->
+    <!-- CAV 小客车：IDM 跟驰，tau / minGap 略增大，加减速稍温和 -->
+    <vType id="CAV" length="4.50" maxSpeed="33.30" guiShape="passenger"
+           color="red"
+           carFollowModel="IDM"
+           accel="3" decel="2"
+           minGap="2"
+           sigma="0.1"
+           laneChangeModel="LC2013"/>
+
+    <!-- CAV 大车（卡车）：IDM 跟驰，车头时距更大、加减速更平缓 -->
+    <vType id="CAV_truck" length="8.00" maxSpeed="27.78" guiShape="truck"
+           color="red"
+           carFollowModel="IDM"
+           accel="2.8" decel="1.8"
+           sigma="0.1"
+           minGap="2.5"
+           laneChangeModel="LC2013"/>
+
+    <!-- 路线 -->
+    <route id="r_fixed" edges="E0 E1 E2 E3 E4 E5 E6 E7"/>
+
+    <!-- 车流：纯 CAV，总 3400 veh/h = 2720 小客车 + 680 大车 -->
+    <!-- 泊松到达：period="exp(λ)"，λ 为期望流率 (veh/s) -->
+
+    <flow id="flow_cav_car" type="CAV" begin="0.00" end="10800.00"
+          route="r_fixed" departLane="random" departSpeed="max"
+          period="exp(0.7556)"/>
+
+    <flow id="flow_cav_truck" type="CAV_truck" begin="0.00" end="10800.00"
+          route="r_fixed" departLane="random" departSpeed="max"
+          period="exp(0.1889)"/>
+
+</routes>
+

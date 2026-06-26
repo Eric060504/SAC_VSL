@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-06-25T09:42:07.196429+08:00 by Eclipse SUMO sumo 1.26.0
+<sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="net.net.xml"/>
+        <route-files value="flow_truck_cav-idm.rou.xml"/>
+        <additional-files value="_test_detector.add.xml"/>
+    </input>
+
+    <time>
+        <begin value="0"/>
+        <end value="60"/>
+        <step-length value="0.1"/>
+    </time>
+
+    <report>
+        <no-warnings value="true"/>
+        <no-step-log value="true"/>
+    </report>
+
+</sumoConfiguration>
+-->
+
+<detector xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/det_e2_file.xsd">
+   <interval begin="0.00" end="60.00" id="e2_E0" sampledSeconds="136.48" nVehEntered="14" nVehLeft="13" nVehSeen="14" meanSpeed="22.57" meanTimeLoss="2.31" meanOccupancy="2.97" maxOccupancy="6.60" meanMaxJamLengthInVehicles="0.00" meanMaxJamLengthInMeters="0.00" maxJamLengthInVehicles="0" maxJamLengthInMeters="0.00" jamLengthInVehiclesSum="0" jamLengthInMetersSum="0.00" meanHaltingDuration="0.40" maxHaltingDuration="0.40" haltingDurationSum="0.40" meanIntervalHaltingDuration="0.40" maxIntervalHaltingDuration="0.40" intervalHaltingDurationSum="0.40" startedHalts="1.00" meanVehicleNumber="2.28" maxVehicleNumber="5" />
+</detector>

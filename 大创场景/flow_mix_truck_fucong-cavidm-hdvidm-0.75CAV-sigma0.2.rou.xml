@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>      
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- 车辆类型：CAV + HDV，当前参数下约 CAV 75%，HDV 25%，都用 IDM，CAV 略温和、HDV 更像人工驾驶 -->
+
+    <!-- CAV 小客车：IDM 跟驰 -->
+    <vType id="CAV" length="4.50" maxSpeed="33.30" guiShape="passenger"
+           color="red"
+           carFollowModel="IDM"
+           accel="3" decel="2"
+           minGap="2"
+           sigma="0.1"
+           laneChangeModel="LC2013"/>
+
+    <!-- CAV 大车（卡车）：IDM 跟驰 -->
+    <vType id="CAV_truck" length="8.00" maxSpeed="27.78" guiShape="truck"
+           color="red"
+           carFollowModel="IDM"
+           accel="2.8" decel="1.8"
+           sigma="0.1"
+           minGap="2.5"
+           laneChangeModel="LC2013"/>
+
+    <!-- HDV 小客车：普通人工驾驶车，IDM 跟驰 + LC2013 换道，限速服从度略有波动 -->
+    <vType id="HDV" length="4.50" maxSpeed="35.00" guiShape="passenger"
+           color="blue" carFollowModel="IDM"  minGap="2.1"
+           accel="2.2" decel="3.2" sigma="0.1" laneChangeModel="LC2013"
+           speedFactor="normc(1.0,0.05,0.9,1.1)"/>
+
+    <!-- HDV 大车（卡车）：人工驾驶卡车，同样有轻微限速不服从度 -->
+    <vType id="HDV_truck" length="8.00" maxSpeed="27.78" guiShape="truck"
+           color="blue" carFollowModel="IDM" tau="1.2" minGap="2.5"
+           accel="2" decel="3" sigma="0.1" laneChangeModel="LC2013"
+           speedFactor="normc(0.95,0.05,0.85,1.05)"/>
+
+    <!-- 路线 -->
+    <route id="r_fixed" edges="E0 E1 E2 E3 E4 E5 E6 E7"/>
+
+    <!-- 车流：总 3400 veh/h；CAV 2550（其中 20% 大车），HDV 850（其中 20% 大车） -->
+    <!-- 泊松到达：period="exp(λ)"，λ 为期望流率 (veh/s) -->
+
+    <!-- CAV：2040 小客车 + 510 大车 -->
+    <flow id="flow_cav_car" type="CAV" begin="0.00" end="10800.00"
+          route="r_fixed" departLane="random" departSpeed="max"
+          period="exp(0.5667)"/>
+
+    <flow id="flow_cav_truck" type="CAV_truck" begin="0.00" end="10800.00"
+          route="r_fixed" departLane="random" departSpeed="max"
+          period="exp(0.1417)"/>
+
+    <!-- HDV：680 小客车 + 170 大车 -->
+    <flow id="flow_hdv_car" type="HDV" begin="0.00" end="10800.00"
+          route="r_fixed" departLane="random" departSpeed="avg"
+          period="exp(0.1889)"/>
+
+    <flow id="flow_hdv_truck" type="HDV_truck" begin="0.00" end="10800.00"
+          route="r_fixed" departLane="random" departSpeed="avg"
+          period="exp(0.0472)"/>
+
+</routes>
