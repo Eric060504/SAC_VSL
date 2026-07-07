@@ -1,193 +1,203 @@
-# 基于 SAC 的高速公路施工区可变限速控制
+# SAC_VSL
 
-一个使用 **Soft Actor-Critic (SAC)** 强化学习算法，在 **SUMO** 交通仿真环境中动态控制高速公路施工区 **可变限速（VSL）** 的研究项目。
+基于 Soft Actor-Critic (SAC) 的高速公路施工区可变限速控制项目。项目使用 SUMO/TraCI 构建交通仿真环境，训练智能体为 E1-E3 区域内的 CAV 车辆输出统一的连续限速值，并与固定限速基线进行对比评估。
 
-## 概述
+## 项目概述
 
-本项目利用深度强化学习实现高速公路施工区的智能交通控制。SAC 智能体学习对施工区三个路段上的网联自动驾驶车辆（CAV）设定最优限速值，以同时提升**交通安全**、**通行效率**、**驾乘舒适性**和**道路吞吐量**。
+本项目面向高速公路施工区的 CAV 可变限速控制。当前版本采用一个统一动作控制 E1、E2、E3 三个路段上的 CAV/CAV_truck 车辆，不再对三个路段分别输出限速。
 
-### 主要特性
+主要特性：
 
-- **SAC 算法**：最先进的离策略（off-policy）强化学习算法，具备自动熵调优以实现稳定探索
-- **多目标奖励**：综合平衡安全性（基于碰撞时间 TTC）、效率（行程时间）、舒适性（加加速度最小化）和吞吐量
-- **CAV 渗透率场景**：支持 25%、50%、75%、100% 四种 CAV 渗透率
-- **SUMO 集成**：通过 TraCI 接口实现逼真的交通仿真
-- **44 维状态空间**：包含路段级和车道级交通特征的全面观测
-- **连续动作空间**：三个施工区段 E1/E2/E3 的可变限速值
+- SAC 算法：双 Critic、Target Critic、自动熵调节，Actor/Critic 使用全连接网络。
+- 连续 VSL 动作：限速范围为 60-120 km/h。
+- 动作变化约束：相邻 5 min 控制周期限速变化不超过 20 km/h。
+- 状态空间：E1-E6 每条路段每个车道的 10 s 窗口交通统计量，共 72 维。
+- 奖励函数：E1-E4 平均速度收益与 TTC 风险惩罚组合。
+- 评估对比：同时输出 RL 控制结果和固定 80 km/h 无控制基线。
+- 多场景运行：支持 cav25、cav50、cav75、cav100，`--scenario all` 会并行运行四个场景。
 
-## 项目结构
+## 目录结构
 
-```
+```text
 大创场景/
-├── run.py                  # 命令行入口（训练与评估）
-├── config.py               # 中心配置（路径、超参数、奖励权重）
-├── sumo_env.py             # SUMO/TraCI 环境（Gym 风格接口）
-├── sac_agent.py            # SAC 算法实现（Actor、Critic、ReplayBuffer）
-├── sac_vsl.py              # 训练编排器（回合循环、日志记录、绘图）
-├── detectors.add.xml       # SUMO 检测器定义
-├── net.net.xml             # SUMO 道路网络定义
-├── *.sumocfg               # 各 CAV 场景的 SUMO 配置文件
-├── *.rou.xml               # 各场景的车辆流路径文件
-├── e2_E*.out.xml / e3_*.xml  # SUMO 输出 / 检测器配置文件
-├── checkpoints/            # 模型检查点目录（生成目录）
-└── results/                # 训练图表和对比图（生成目录）
+├── README.md
+└── 大创场景/
+    ├── run.py                  # 命令行入口
+    ├── config.py               # 路网、仿真、SAC、奖励和评估配置
+    ├── sumo_env.py             # SUMO/TraCI 环境
+    ├── sac_agent.py            # SAC 智能体
+    ├── sac_vsl.py              # 训练、评估和结果绘图
+    ├── net.net.xml             # SUMO 路网文件
+    ├── detectors.add.xml       # 检测器配置
+    ├── *.sumocfg               # 不同 CAV 渗透率场景配置
+    ├── *.rou.xml               # 车辆流与路径文件
+    ├── checkpoints/            # 训练生成的模型文件
+    └── results/                # 训练与评估输出结果
 ```
 
-## 路网布局
+`checkpoints/`、`results/`、`*.out.xml` 和 `__pycache__/` 属于运行生成文件，通常不需要提交到仓库。
 
-仿真的道路网络为包含施工区的高速公路走廊：
+## 路网与场景
 
+仿真路网覆盖 E0-E7，其中控制、观测、奖励和评估范围如下：
+
+| 用途 | 路段 |
+| --- | --- |
+| VSL 控制 | E1, E2, E3 |
+| 状态观测 | E1, E2, E3, E4, E5, E6 |
+| 奖励统计 | E1, E2, E3, E4 |
+| 评估统计 | E1, E2, E3, E4, E5, E6 |
+| 固定限速基线 | E1, E2, E3, E4, E5, E6 |
+
+E5 路段长度为 350 m，配置已在 `net.net.xml`、`detectors.add.xml` 和 `config.py` 中同步。
+
+四个 CAV 渗透率场景：
+
+| 场景 | CAV 渗透率 | SUMO 配置 |
+| --- | ---: | --- |
+| cav25 | 25% | `speedcontrol9.sumocfg` |
+| cav50 | 50% | `speedcontrol10.sumocfg` |
+| cav75 | 75% | `speedcontrol1.sumocfg` |
+| cav100 | 100% | `speedcontrol2.sumocfg` |
+
+## 强化学习设置
+
+### 状态空间
+
+状态维度为 72：
+
+```text
+6 条观测路段 × 3 条车道 × 4 个特征 = 72
 ```
-E0 ──→ E1 ──→ E2 ──→ E3 ──→ E4 ──→ E5
-(500m)  (500m) (500m) (500m) (200m) (300m)
-        ↑ VSL   ↑ VSL   ↑ VSL
-       控制段   控制段   控制段
+
+每个车道的 4 个特征为：
+
+- 10 s 窗口平均速度
+- 10 s 窗口车辆数量 / 路段长度
+- 10 s 窗口速度标准差
+- 10 s 窗口车辆数量 / 路段长度标准差
+
+环境每秒采集一次 lane 级瞬时速度和车辆数量，并维护 10 s 滚动窗口。决策点返回窗口统计值，而不是当前瞬时交通状态。
+
+### 动作空间
+
+动作维度为 1。SAC 输出的连续动作会映射为 E1-E3 全区域 CAV 统一限速：
+
+```text
+VSL ∈ [60, 120] km/h
 ```
 
-- **E0**：上游接近段（500m，限速 120 km/h）
-- **E1、E2、E3**：施工区段（各 500m，限速 80 km/h）—— **VSL 控制应用于此**
-- **E4、E5**：恢复 / 下游段（200m + 300m）
-- 所有路段均为 3 车道
-
-VSL 值仅应用于 E1/E2/E3 路段上的 **CAV 车辆**。非 CAV（人工驾驶）车辆遵循默认跟驰行为（IDM 模型）。
-
-## 强化学习公式
-
-### 状态空间（44 维）
-
-| 特征组 | 维度 | 描述 |
-|---|---|---|
-| 路段级特征（E0–E5） | 6 路段 × 5 = 30 | 速度比、占有率、密度、停驻比例、车道速度标准差 |
-| 车道级速度（E1–E3） | 3 路段 × 3 车道 = 9 | 每车道平均速度归一化值 |
-| 上游 E0 特征 | 3 | 流入比、速度比、占有率 |
-| 时间编码 | 2 | 归一化仿真时间的 sin/cos |
-
-### 动作空间（3 维）
-
-连续值 `[-1, 1]` 映射到 VSL 值 `[8.33, 22.22] m/s`（30–80 km/h），对应路段 E1、E2、E3。动作通过指数移动平均（EMA，α=0.3）进行平滑。
+控制周期为 300 s。相邻控制周期的限速变化幅度被限制在 20 km/h 以内。
 
 ### 奖励函数
 
-复合奖励函数加权四个目标：
+奖励统计范围为 E1-E4，默认每 3 s 采样一次：
 
-| 分量 | 权重 | 描述 |
-|---|---|---|
-| **安全** (r_safety) | 0.35 | 惩罚 TTC < 3s 的违规和车道间速度差 |
-| **效率** (r_efficiency) | 0.35 | 基于 E1–E5 段平均行程时间与自由流基线（约 90s）的对比 |
-| **舒适** (r_comfort) | 0.15 | 平均加加速度（加速度变化率）的指数衰减 |
-| **吞吐量** (r_throughput) | 0.15 | 已完成车辆数与预期需求的比值 |
+```text
+reward = speed_norm - ttc_risk
+speed_norm = mean_speed_kmh / 120
+ttc_risk = mean(TTC values where TTC < 3 s) / 3
+```
 
-### 控制周期
+如果当前统计窗口内没有 TTC < 3 s 的样本，则 `ttc_risk = 0`。
 
-- **决策间隔**：每 120 秒仿真时间
-- **预热阶段**：前 600s（5 个间隔）不施加控制，用于路网车辆填充
-- **单回合时长**：3600s（1 小时）→ 预热后共 30 个控制步
+## 仿真与评估
 
-## 场景配置
+仿真时长为 3 h：
 
-| 场景 | CAV 比例 | SUMO 配置文件 | 随机种子 |
-|---|---|---|---|
-| cav25 | 25% | speedcontrol9.sumocfg | 0 |
-| cav50 | 50% | speedcontrol10.sumocfg | 1 |
-| cav75 | 75% | speedcontrol1.sumocfg | 2 |
-| cav100 | 100% | speedcontrol2.sumocfg | 3 |
+```text
+SIM_END = 10800 s
+CONTROL_INTERVAL = 300 s
+CONTROL_STEPS_PER_EPISODE = 36
+WARMUP_SECONDS = 600 s
+```
 
-交通需求：总计 3,400 辆/小时，卡车占比 20%。
+评估统计频率为 1 s。每次评估同时运行：
+
+- RL 控制策略
+- 固定 80 km/h 无控制基线
+
+输出指标包括：
+
+- E1-E6 车辆总通行时间
+- CO2 排放
+- TTC < 3 s 总数量
+- E4 的 TTC < 3 s 数量
+- E4 平均速度
+- E1-E3 的 TTC < 3 s 数量
+- E1-E3 平均速度
+
+## 环境要求
+
+- Windows 或 Linux
+- Python 3.9+
+- SUMO 1.26.0 或兼容版本
+- PyTorch
+- NumPy
+- Matplotlib
+- TraCI
+
+默认 SUMO 路径在 `大创场景/config.py` 和 `大创场景/run.py` 中配置为：
+
+```text
+D:/sumo-win64-1.26.0/sumo-1.26.0
+```
+
+如果本机安装路径不同，需要先修改对应配置。
 
 ## 使用方法
 
-### 环境要求
+进入代码目录：
 
-- **SUMO 1.26.0** 安装在 `D:/sumo-win64-1.26.0/sumo-1.26.0`（可在 `config.py` 中配置）
-- Python 环境需安装 PyTorch、NumPy、Matplotlib
+```powershell
+cd 大创场景
+```
 
-### 训练
+训练单个场景：
 
-```bash
-# 训练单个场景（默认：cav100，300 回合）
+```powershell
 python run.py --scenario cav100 --mode train --episodes 300
+```
 
-# 依次训练所有场景
+并行训练四个场景：
+
+```powershell
 python run.py --scenario all --mode train --episodes 300
-
-# 使用 GUI 训练（用于调试）
-python run.py --scenario cav50 --mode train --gui
 ```
 
-### 评估
+评估单个场景：
 
-```bash
-# 评估已训练的模型
-python run.py --scenario cav100 --mode eval --checkpoint checkpoints/sac_vsl_cav100_best.pt
-
-# 评估所有场景
-python run.py --scenario all --mode eval --checkpoint checkpoints/
-
-# 指定评估回合数
-python run.py --scenario cav50 --mode eval --checkpoint checkpoints/sac_vsl_cav50_best.pt --episodes 20
+```powershell
+python run.py --scenario cav100 --mode eval --checkpoint checkpoints/sac_vsl_cav100_best.pt --episodes 1
 ```
 
-### 其他参数
+并行评估四个场景：
 
-```bash
+```powershell
+python run.py --scenario all --mode eval --checkpoint checkpoints/ --episodes 1
+```
+
+指定并行 worker 数：
+
+```powershell
+python run.py --scenario all --mode eval --checkpoint checkpoints/ --parallel-workers 4
+```
+
+查看命令行参数：
+
+```powershell
 python run.py --help
-# --scenario:  cav25 | cav50 | cav75 | cav100 | all（默认：cav100）
-# --mode:      train | eval（默认：train）
-# --episodes:  回合数（训练默认 300，评估默认 10）
-# --gui:       启动 SUMO GUI 可视化
-# --checkpoint: 检查点文件或目录路径
-# --device:    auto | cpu | cuda（默认：auto）
 ```
 
-## SAC 算法细节
+## 注意事项
 
-本项目实现 **Soft Actor-Critic**，包含：
+- 当前版本的状态维度为 72、动作维度为 1。旧版本 checkpoint 如果基于 44 维状态或三段式动作训练，不能直接复用。
+- `--scenario all` 在非 GUI 模式下会使用多进程并行运行四个场景，每个进程独立创建 SUMO/TraCI 连接。
+- GUI 模式下建议单场景运行，避免多个 SUMO GUI 同时启动。
+- 如果评估时没有提供 checkpoint，程序会提示并使用未训练智能体运行，结果仅用于流程检查。
 
-- **重参数化高斯策略**：随机动作用于探索，确定性均值用于评估
-- **双 Q 网络**：裁剪双 Q 学习以减少价值过估计
-- **软目标更新**：Polyak 平均（τ=0.005）确保稳定训练
-- **自动熵调优**：可学习的 α 平衡探索与利用
-- **层归一化（LayerNorm）**：应用于 Actor 和 Critic 网络以提升训练稳定性
-- **梯度裁剪**：范数裁剪为 1.0
+## 参考
 
-### 网络架构
-
-Actor 和 Critic 共享相同的隐藏层结构：`[256, 256, 128]`，激活函数为 ReLU，并使用 LayerNorm。
-
-### 关键超参数
-
-| 参数 | 值 |
-|---|---|
-| Actor / Critic / Alpha 学习率 | 3e-4 |
-| 折扣因子 (γ) | 0.99 |
-| 批大小 | 256 |
-| 经验回放缓冲区大小 | 1,000,000 |
-| 每环境步更新次数 | 5 |
-| 梯度裁剪范数 | 1.0 |
-| 初始 log α | ln(0.1) ≈ -2.3026 |
-
-## 输出结果
-
-### 训练
-
-- **检查点**：每 50 回合保存一次 + 最优模型（基于 10 回合滑动平均）+ 最终模型，存储于 `checkpoints/`
-- **图表**：奖励曲线、损失/α 曲线、VSL 策略演化图，保存至 `results/`
-
-### 评估
-
-- 每回合指标打印至控制台
-- 跨场景对比表格（使用 `--scenario all` 时）
-- 对比柱状图保存至 `results/scenario_comparison.png`
-
-## 参考文献
-
-- Haarnoja, T., et al. "Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor." ICML 2018.
-- Haarnoja, T., et al. "Soft Actor-Critic Algorithms and Applications." arXiv 2018.
-- SUMO: "Microscopic Traffic Simulation using SUMO." IEEE ITSC 2018.
-
-## 运行环境
-
-- **Python**：Conda 环境 `LLM_Classification`，Python 可执行文件位于 `D:/anaconda/envs/LLM_Classification/python.exe`
-- **SUMO**：版本 1.26.0，安装于 `D:/sumo-win64-1.26.0/sumo-1.26.0`
-- **操作系统**：Windows 11
-- **GPU**：支持 CUDA（自动检测）
+- Haarnoja, T. et al. Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor. ICML, 2018.
+- Haarnoja, T. et al. Soft Actor-Critic Algorithms and Applications. arXiv, 2018.
+- Lopez, P. A. et al. Microscopic Traffic Simulation using SUMO. IEEE ITSC, 2018.
