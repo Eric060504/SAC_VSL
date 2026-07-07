@@ -31,8 +31,12 @@ SCENARIOS = {
 # ============================================================
 EDGES_ALL  = ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7"]
 CONTROL_EDGES   = ["E1", "E2", "E3"]             # VSL applied to CAVs here
-OBS_EDGES       = ["E0", "E1", "E2", "E3", "E4", "E5"]   # observation region
-REWARD_EDGES    = ["E1", "E2", "E3", "E4", "E5"]  # reward calculation region
+OBS_EDGES       = ["E1", "E2", "E3", "E4", "E5", "E6"]
+REWARD_EDGES    = ["E1", "E2", "E3", "E4"]
+EVAL_EDGES      = ["E1", "E2", "E3", "E4", "E5", "E6"]
+BASELINE_EDGES  = ["E1", "E2", "E3", "E4", "E5", "E6"]
+E4_EDGE         = "E4"
+E1_E3_EDGES     = ["E1", "E2", "E3"]
 UPSTREAM_EDGE   = "E0"
 
 LANES_PER_EDGE  = 3
@@ -41,7 +45,7 @@ LANE_INDICES    = [0, 1, 2]
 # Edge lengths (meters)
 EDGE_LENGTHS = {
     "E0": 500, "E1": 500, "E2": 500, "E3": 500,
-    "E4": 200, "E5": 300, "E6":  50, "E7": 500,
+    "E4": 200, "E5": 350, "E6":  50, "E7": 500,
 }
 # Edge speed limits (m/s) — from net.xml
 EDGE_SPEED_LIMITS = {
@@ -54,35 +58,39 @@ CAV_TYPES = {"CAV", "CAV_truck"}
 
 # Vehicle effective length + min Gap for density estimation (meters)
 VEH_EFFECTIVE_LENGTH = 7.5
+LANE_MAX_VEHICLES = {edge: EDGE_LENGTHS[edge] / VEH_EFFECTIVE_LENGTH for edge in EDGES_ALL}
 
 # ============================================================
 # Simulation Settings
 # ============================================================
 SIM_BEGIN       = 0
-SIM_END         = 3600         # 1 hour (reduced from 3h for faster training)
+SIM_END         = 10800        # 3 hours
 SUMO_STEP_LENGTH = 1.0         # seconds per SUMO step (coarser for speed)
-CONTROL_INTERVAL = 120         # seconds between RL decisions
-STEPS_PER_CONTROL = int(CONTROL_INTERVAL / SUMO_STEP_LENGTH)  # 120
+CONTROL_INTERVAL = 300         # seconds between RL decisions
+STEPS_PER_CONTROL = int(CONTROL_INTERVAL / SUMO_STEP_LENGTH)  # 300
 
-TOTAL_SIM_STEPS = int((SIM_END - SIM_BEGIN) / SUMO_STEP_LENGTH)  # 3600
-CONTROL_STEPS_PER_EPISODE = TOTAL_SIM_STEPS // STEPS_PER_CONTROL   # 30
+TOTAL_SIM_STEPS = int((SIM_END - SIM_BEGIN) / SUMO_STEP_LENGTH)  # 10800
+CONTROL_STEPS_PER_EPISODE = TOTAL_SIM_STEPS // STEPS_PER_CONTROL   # 36
 
-WARMUP_CONTROL_STEPS = 5       # first 600s (5×120s=600s): no control, no reward
+WARMUP_SECONDS = 600
+WARMUP_STEPS = int(WARMUP_SECONDS / SUMO_STEP_LENGTH)
 TRAFFIC_FLOW_RATE = 3400       # veh/h total
 TRUCK_RATIO = 0.20
 
 # ============================================================
 # VSL Action Bounds
 # ============================================================
-VSL_MIN = 8.33   # m/s (30 km/h) — minimum safe speed in work zone
-VSL_MAX = 22.22  # m/s (80 km/h) — posted work zone speed limit
-VSL_SMOOTHING_ALPHA = 0.3  # EMA smoothing factor
+VSL_MIN = 60.0 / 3.6
+VSL_MAX = 120.0 / 3.6
+VSL_MAX_DELTA = 20.0 / 3.6
+BASELINE_SPEED = 80.0 / 3.6
 
 # ============================================================
 # State / Action Dimensions
 # ============================================================
-STATE_DIM  = 44
-ACTION_DIM = 3    # one VSL value per control edge (E1, E2, E3)
+STATE_DIM  = 72
+ACTION_DIM = 1    # one unified VSL value for E1-E3 CAVs
+STATE_WINDOW = 10
 
 # ============================================================
 # SAC Hyperparameters
@@ -111,12 +119,10 @@ LOG_INTERVAL    = 1
 CHECKPOINT_DIR  = os.path.join(PROJECT_DIR, "checkpoints")
 
 # ============================================================
-# Reward Weights
+# Reward Settings
 # ============================================================
-W_SAFETY     = 0.35
-W_EFFICIENCY = 0.35
-W_COMFORT    = 0.15
-W_THROUGHPUT = 0.15
+REWARD_SAMPLE_INTERVAL = 3
+EVAL_SAMPLE_INTERVAL = 1
 
 # Safety sub-parameters
 TTC_THRESHOLD     = 3.0    # seconds — TTC below this is critical

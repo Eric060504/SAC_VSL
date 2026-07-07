@@ -36,9 +36,9 @@
     <laneAreaDetector id="e2_E4_2" lane="E4_2" pos="0" endPos="200" period="60" file="e2_E4.out.xml"/>
 
     <!-- E5: near exit (300m), 80km/h — 3 lanes -->
-    <laneAreaDetector id="e2_E5_0" lane="E5_0" pos="0" endPos="300" period="60" file="e2_E5.out.xml"/>
-    <laneAreaDetector id="e2_E5_1" lane="E5_1" pos="0" endPos="300" period="60" file="e2_E5.out.xml"/>
-    <laneAreaDetector id="e2_E5_2" lane="E5_2" pos="0" endPos="300" period="60" file="e2_E5.out.xml"/>
+    <laneAreaDetector id="e2_E5_0" lane="E5_0" pos="0" endPos="350" period="60" file="e2_E5.out.xml"/>
+    <laneAreaDetector id="e2_E5_1" lane="E5_1" pos="0" endPos="350" period="60" file="e2_E5.out.xml"/>
+    <laneAreaDetector id="e2_E5_2" lane="E5_2" pos="0" endPos="350" period="60" file="e2_E5.out.xml"/>
 
     <!-- ============================================================
          E3 Multi-Entry-Exit Detector (entryExitDetector)
@@ -56,9 +56,9 @@
         <detEntry lane="E1_1" pos="0"/>
         <detEntry lane="E1_2" pos="0"/>
         <!-- Exit points: E5 end (all 3 lanes) -->
-        <detExit lane="E5_0" pos="300"/>
-        <detExit lane="E5_1" pos="300"/>
-        <detExit lane="E5_2" pos="300"/>
+        <detExit lane="E5_0" pos="350"/>
+        <detExit lane="E5_1" pos="350"/>
+        <detExit lane="E5_2" pos="350"/>
     </entryExitDetector>
 
 </additional>

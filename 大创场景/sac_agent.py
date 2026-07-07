@@ -396,10 +396,10 @@ if __name__ == "__main__":
         BATCH_SIZE = 256
         GRADIENT_CLIP = 1.0
         INITIAL_LOG_ALPHA = -2.3026
-        TARGET_ENTROPY = -3.0
+        TARGET_ENTROPY = -1.0
 
     config = DummyConfig()
-    state_dim, action_dim = 44, 3
+    state_dim, action_dim = 72, 1
 
     # Test Actor
     actor = Actor(state_dim, action_dim, config.HIDDEN_SIZES)

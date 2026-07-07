@@ -1,32 +1,24 @@
 """
-sac_vsl.py — Training orchestrator for SAC-based VSL control.
-
-Handles:
-  - Training loop over multiple episodes
-  - Evaluation with deterministic policy
-  - Model checkpointing
-  - Logging of training metrics
+Training and evaluation orchestration for SAC-based VSL control.
 """
 
 import os
 import sys
 import time
-import numpy as np
 from collections import defaultdict
 
-# Ensure SUMO tools are on the path
+import numpy as np
+
 if "SUMO_HOME" not in os.environ:
     os.environ["SUMO_HOME"] = "D:/sumo-win64-1.26.0/sumo-1.26.0"
     sys.path.append(os.path.join(os.environ["SUMO_HOME"], "tools"))
 
+from sac_agent import ReplayBuffer, SACAgent
 from sumo_env import SumoVSLEnv
-from sac_agent import SACAgent, ReplayBuffer
 
 
 class SACVSLTrainer:
-    """
-    Trainer that ties together the SUMO VSL environment and SAC agent.
-    """
+    """Trainer that ties together the SUMO environment and SAC agent."""
 
     def __init__(self, config, scenario_name, gui=False, checkpoint_path=None):
         self.config = config
@@ -35,50 +27,34 @@ class SACVSLTrainer:
         self.gui = gui
         self.checkpoint_path = checkpoint_path
 
-        # Set seed
         seed = config.SCENARIO_SEEDS.get(scenario_name, 0)
         np.random.seed(seed)
-        torch_seed = seed
 
         import torch
-        torch.manual_seed(torch_seed)
+        torch.manual_seed(seed)
         if torch.cuda.is_available():
-            torch.cuda.manual_seed(torch_seed)
+            torch.cuda.manual_seed(seed)
 
-        # Create environment
         self.env = SumoVSLEnv(self.sumocfg, config, gui=gui, seed=seed)
-
-        # Create agent
         self.agent = SACAgent(config.STATE_DIM, config.ACTION_DIM, config)
+        self.buffer = ReplayBuffer(config.STATE_DIM, config.ACTION_DIM, max_size=config.BUFFER_SIZE)
 
-        # Create replay buffer
-        self.buffer = ReplayBuffer(config.STATE_DIM, config.ACTION_DIM,
-                                   max_size=config.BUFFER_SIZE)
-
-        # Load checkpoint if provided
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint from {checkpoint_path}")
             self.agent.load(checkpoint_path)
 
-        # Metrics history
         self.episode_rewards = []
         self.actor_losses = []
         self.critic_losses = []
         self.alphas = []
-        self.vsl_history = []  # list of avg VSL per episode
-        self.eval_metrics = []
+        self.vsl_history = []
+        self.eval_metrics = {}
 
     # ================================================================
     # Training
     # ================================================================
 
     def train(self, num_episodes=None):
-        """
-        Run the training loop.
-
-        Args:
-            num_episodes: number of episodes (defaults to config.TRAIN_EPISODES)
-        """
         if num_episodes is None:
             num_episodes = self.config.TRAIN_EPISODES
 
@@ -86,38 +62,36 @@ class SACVSLTrainer:
         best_avg_reward = -float("inf")
         checkpoint_dir = self.config.CHECKPOINT_DIR
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Training SAC VSL: scenario={self.scenario_name} "
               f"(CAV={self.cav_rate:.0%}), episodes={num_episodes}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         for episode in range(1, num_episodes + 1):
             episode_start_time = time.time()
-
-            # Reset environment
             obs = self.env.reset()
             episode_reward = 0.0
             episode_steps = 0
             episode_losses = defaultdict(list)
+            info = {"vsl": self.config.VSL_MAX, "vsl_kmh": self.config.VSL_MAX * 3.6}
 
-            # Run one episode
             while True:
-                # Select action
                 action = self.agent.select_action(obs, evaluate=False)
-
-                # Step environment
                 next_obs, reward, done, info = self.env.step(action)
 
-                # Store transition
-                self.buffer.push(obs, action, np.array([reward], dtype=np.float32),
-                                 next_obs, np.array([float(done)], dtype=np.float32))
+                self.buffer.push(
+                    obs,
+                    action,
+                    np.array([reward], dtype=np.float32),
+                    next_obs,
+                    np.array([float(done)], dtype=np.float32),
+                )
 
-                # Update agent if buffer has enough data
                 if len(self.buffer) >= self.config.MIN_BUFFER_SIZE:
                     for _ in range(self.config.UPDATES_PER_STEP):
                         loss_info = self.agent.update(self.buffer)
-                    for k, v in loss_info.items():
-                        episode_losses[k].append(v)
+                    for key, value in loss_info.items():
+                        episode_losses[key].append(value)
 
                 obs = next_obs
                 episode_reward += reward
@@ -127,49 +101,40 @@ class SACVSLTrainer:
                 if done:
                     break
 
-            # End of episode
             self.episode_rewards.append(episode_reward)
             avg_losses = {k: np.mean(v) for k, v in episode_losses.items()} if episode_losses else {}
-            self.actor_losses.append(avg_losses.get('actor_loss', 0.0))
-            self.critic_losses.append(avg_losses.get('critic_loss', 0.0))
+            self.actor_losses.append(avg_losses.get("actor_loss", 0.0))
+            self.critic_losses.append(avg_losses.get("critic_loss", 0.0))
             self.alphas.append(self.agent.alpha_value)
-            self.vsl_history.append([
-                info.get('vsl_E1', 0), info.get('vsl_E2', 0), info.get('vsl_E3', 0)
-            ])
+            self.vsl_history.append(info.get("vsl", 0.0))
 
             elapsed = time.time() - episode_start_time
-
-            # Logging
             if episode % self.config.LOG_INTERVAL == 0:
                 print(f"Ep {episode:4d}/{num_episodes} | "
                       f"Reward: {episode_reward:7.2f} | "
                       f"Steps: {episode_steps:3d} | "
-                      f"α: {self.agent.alpha_value:.4f} | "
+                      f"alpha: {self.agent.alpha_value:.4f} | "
                       f"ActorLoss: {avg_losses.get('actor_loss', 0):.4f} | "
                       f"CriticLoss: {avg_losses.get('critic_loss', 0):.4f} | "
                       f"Time: {elapsed:.1f}s | "
-                      f"VSL[E1/E2/E3]: {info.get('vsl_E1',0):.1f}/{info.get('vsl_E2',0):.1f}/{info.get('vsl_E3',0):.1f}")
+                      f"VSL[E1-E3]: {info.get('vsl', 0):.2f} m/s "
+                      f"({info.get('vsl_kmh', 0):.1f} km/h)")
 
-            # Periodic checkpoint
             if episode % self.config.SAVE_INTERVAL == 0:
-                ckpt_path = os.path.join(checkpoint_dir,
-                                         f"sac_vsl_{self.scenario_name}_ep{episode}.pt")
+                ckpt_path = os.path.join(checkpoint_dir, f"sac_vsl_{self.scenario_name}_ep{episode}.pt")
                 self.agent.save(ckpt_path)
                 print(f"  -> Checkpoint saved: {ckpt_path}")
 
-            # Track best model
             recent_avg = np.mean(self.episode_rewards[-10:]) if len(self.episode_rewards) >= 10 else episode_reward
             if len(self.episode_rewards) >= 10 and recent_avg > best_avg_reward:
                 best_avg_reward = recent_avg
                 best_path = os.path.join(checkpoint_dir, f"sac_vsl_{self.scenario_name}_best.pt")
                 self.agent.save(best_path)
 
-        # Save final model
         final_path = os.path.join(checkpoint_dir, f"sac_vsl_{self.scenario_name}_final.pt")
         self.agent.save(final_path)
         print(f"\nTraining complete. Final model: {final_path}")
         print(f"Best avg reward (over 10 eps): {best_avg_reward:.2f}")
-
         self.env.close()
 
     # ================================================================
@@ -177,130 +142,197 @@ class SACVSLTrainer:
     # ================================================================
 
     def evaluate(self, num_episodes=None):
-        """
-        Evaluate the trained agent with deterministic policy.
-
-        Returns:
-            dict of evaluation metrics
-        """
+        """Evaluate deterministic SAC VSL and fixed 80 km/h no-control baseline."""
         if num_episodes is None:
             num_episodes = self.config.EVAL_EPISODES
 
-        print(f"\n{'='*60}")
-        print(f"Evaluating SAC VSL: scenario={self.scenario_name} "
+        print(f"\n{'=' * 60}")
+        print(f"Evaluating scenario={self.scenario_name} "
               f"(CAV={self.cav_rate:.0%}), episodes={num_episodes}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
-        all_rewards = []
-        all_ttc_violations = []
-        all_avg_speeds = []
-        all_travel_times = []
-        all_vsl_values = []
+        rl_runs = []
+        baseline_runs = []
+        for episode in range(1, num_episodes + 1):
+            rl_metrics = self._evaluate_one_episode(policy="rl")
+            baseline_metrics = self._evaluate_one_episode(policy="baseline")
+            rl_runs.append(rl_metrics)
+            baseline_runs.append(baseline_metrics)
+            print(f"  Eval Ep {episode:2d} | "
+                  f"RL TT={rl_metrics['total_travel_time']:.1f}s, "
+                  f"CO2={rl_metrics['co2_emission']:.1f}mg, "
+                  f"TTC={rl_metrics['ttc_total']} | "
+                  f"Baseline TT={baseline_metrics['total_travel_time']:.1f}s, "
+                  f"CO2={baseline_metrics['co2_emission']:.1f}mg, "
+                  f"TTC={baseline_metrics['ttc_total']}")
 
-        import traci
-        import traci.constants as tc
-
-        for ep in range(1, num_episodes + 1):
-            obs = self.env.reset()
-            ep_reward = 0.0
-            ep_ttc = 0
-            ep_speeds = []
-            ep_tt = []
-            ep_vsls = []
-
-            # Collect CAV-specific metrics in evaluation mode
-            steps_in_ep = 0
-            while True:
-                action = self.agent.select_action(obs, evaluate=True)
-                # Record VSL values
-                vsl_raw = self.env._prev_vsl.copy()
-                ep_vsls.append(vsl_raw)
-
-                next_obs, reward, done, info = self.env.step(action)
-                obs = next_obs
-                ep_reward += reward
-                steps_in_ep += 1
-
-                # Collect TTC violations (same computation as in env)
-                try:
-                    for edge in self.config.REWARD_EDGES:
-                        veh_ids = traci.edge.getLastStepVehicleIDs(edge)
-                        for veh_id in veh_ids:
-                            ttc = self.env._compute_ttc(veh_id)
-                            if ttc is not None and ttc < self.config.TTC_THRESHOLD:
-                                ep_ttc += 1
-                except Exception:
-                    pass
-
-                # Collect edge-level speeds on E1-E5
-                try:
-                    for edge in self.config.REWARD_EDGES:
-                        spd = traci.edge.getLastStepMeanSpeed(edge)
-                        if spd >= 0:
-                            ep_speeds.append(spd)
-                except Exception:
-                    pass
-
-                # Collect E3 travel time
-                try:
-                    mean_tt = traci.multientryexit.getLastIntervalMeanTravelTime(
-                        self.config.E3_DETECTOR_ID)
-                    if mean_tt is not None and mean_tt > 0:
-                        ep_tt.append(float(mean_tt))
-                except Exception:
-                    pass
-
-                if done:
-                    break
-
-            all_rewards.append(ep_reward)
-            all_ttc_violations.append(ep_ttc)
-            if ep_speeds:
-                all_avg_speeds.append(np.mean(ep_speeds))
-            if ep_tt:
-                all_travel_times.append(np.mean(ep_tt))
-            ep_vsls = np.array(ep_vsls)
-            all_vsl_values.append(ep_vsls.mean(axis=0))
-
-            print(f"  Eval Ep {ep:2d}: reward={ep_reward:7.2f}, "
-                  f"TTC<3s={ep_ttc:5d}, "
-                  f"avg_speed={np.mean(ep_speeds) if ep_speeds else 0:.2f} m/s, "
-                  f"avg_TT={np.mean(ep_tt) if ep_tt else 0:.1f} s")
-
-        # Aggregate metrics
         metrics = {
             "scenario": self.scenario_name,
             "cav_rate": self.cav_rate,
-            "mean_reward": float(np.mean(all_rewards)),
-            "std_reward": float(np.std(all_rewards)),
-            "mean_ttc_violations": float(np.mean(all_ttc_violations)),
-            "mean_speed": float(np.mean(all_avg_speeds)) if all_avg_speeds else 0.0,
-            "mean_travel_time": float(np.mean(all_travel_times)) if all_travel_times else 0.0,
-            "avg_vsl_E1": float(np.mean([v[0] for v in all_vsl_values])),
-            "avg_vsl_E2": float(np.mean([v[1] for v in all_vsl_values])),
-            "avg_vsl_E3": float(np.mean([v[2] for v in all_vsl_values])),
+            "rl": self._aggregate_eval_metrics(rl_runs),
+            "baseline": self._aggregate_eval_metrics(baseline_runs),
         }
-
         self.eval_metrics = metrics
         self.env.close()
 
         print(f"\n  === Summary ({self.scenario_name}, CAV={self.cav_rate:.0%}) ===")
-        print(f"  Mean Reward:        {metrics['mean_reward']:.2f} ± {metrics['std_reward']:.2f}")
-        print(f"  Mean TTC Violations: {metrics['mean_ttc_violations']:.1f}")
-        print(f"  Mean Speed:          {metrics['mean_speed']:.2f} m/s")
-        print(f"  Mean Travel Time:    {metrics['mean_travel_time']:.1f} s")
-        print(f"  Avg VSL [E1/E2/E3]:  {metrics['avg_vsl_E1']:.1f}/{metrics['avg_vsl_E2']:.1f}/{metrics['avg_vsl_E3']:.1f} m/s")
-
+        self._print_eval_summary("RL", metrics["rl"])
+        self._print_eval_summary("Baseline 80km/h", metrics["baseline"])
         return metrics
+
+    def _evaluate_one_episode(self, policy):
+        import traci
+
+        obs = self.env.reset()
+        reward_sum = 0.0
+        reward_count = 0
+        vsl_values = []
+        trip_entries = {}
+        completed_travel_times = []
+        co2_emission = 0.0
+        ttc_total = 0
+        ttc_e4 = 0
+        ttc_e1_e3 = 0
+        e4_speeds = []
+        e1_e3_speeds = []
+
+        while self.env.sim_time < self.config.SIM_END:
+            if policy == "rl":
+                action = self.agent.select_action(obs, evaluate=True)
+                self.env.set_action(action)
+                self.env._reset_reward_accumulators()
+                vsl_values.append(self.env._prev_vsl)
+                mode = "rl"
+            else:
+                mode = "baseline"
+
+            for _ in range(self.config.STEPS_PER_CONTROL):
+                if self.env.sim_time >= self.config.SIM_END:
+                    break
+
+                self.env.advance_one_second(mode=mode, collect_reward=(policy == "rl"))
+                self._collect_travel_time_sample(traci, trip_entries, completed_travel_times)
+                self._collect_speed_samples(traci, e4_speeds, e1_e3_speeds)
+                co2_emission += self._collect_co2(traci)
+                counts = self._collect_ttc_counts(traci)
+                ttc_total += counts["total"]
+                ttc_e4 += counts["e4"]
+                ttc_e1_e3 += counts["e1_e3"]
+
+            if policy == "rl":
+                reward_sum += self.env._compute_reward()
+                reward_count += 1
+                obs = self.env._collect_observation()
+
+        self.env.close()
+        return {
+            "mean_reward": reward_sum / max(reward_count, 1),
+            "total_travel_time": float(np.sum(completed_travel_times)),
+            "co2_emission": float(co2_emission),
+            "ttc_total": int(ttc_total),
+            "ttc_e4": int(ttc_e4),
+            "e4_mean_speed": float(np.mean(e4_speeds)) if e4_speeds else 0.0,
+            "ttc_e1_e3": int(ttc_e1_e3),
+            "e1_e3_mean_speed": float(np.mean(e1_e3_speeds)) if e1_e3_speeds else 0.0,
+            "avg_vsl": float(np.mean(vsl_values)) if vsl_values else self.config.BASELINE_SPEED,
+        }
+
+    @staticmethod
+    def _edge_vehicle_ids(traci, edge):
+        try:
+            return traci.edge.getLastStepVehicleIDs(edge)
+        except Exception:
+            return []
+
+    def _collect_travel_time_sample(self, traci, trip_entries, completed_travel_times):
+        sim_time = traci.simulation.getTime()
+        for veh_id in self._edge_vehicle_ids(traci, "E1"):
+            trip_entries.setdefault(veh_id, sim_time)
+        for veh_id in self._edge_vehicle_ids(traci, "E7"):
+            start_time = trip_entries.pop(veh_id, None)
+            if start_time is not None:
+                completed_travel_times.append(max(sim_time - start_time, 0.0))
+
+    def _collect_speed_samples(self, traci, e4_speeds, e1_e3_speeds):
+        try:
+            e4_speed = traci.edge.getLastStepMeanSpeed(self.config.E4_EDGE)
+            if e4_speed >= 0:
+                e4_speeds.append(float(e4_speed))
+        except Exception:
+            pass
+
+        speeds = []
+        for edge in self.config.E1_E3_EDGES:
+            try:
+                speed = traci.edge.getLastStepMeanSpeed(edge)
+                if speed >= 0:
+                    speeds.append(float(speed))
+            except Exception:
+                pass
+        if speeds:
+            e1_e3_speeds.append(float(np.mean(speeds)))
+
+    @staticmethod
+    def _collect_co2(traci):
+        total = 0.0
+        try:
+            veh_ids = traci.vehicle.getIDList()
+        except Exception:
+            return total
+        for veh_id in veh_ids:
+            try:
+                total += float(traci.vehicle.getCO2Emission(veh_id))
+            except Exception:
+                pass
+        return total
+
+    def _collect_ttc_counts(self, traci):
+        counts = {"total": 0, "e4": 0, "e1_e3": 0}
+        for edge in self.config.EVAL_EDGES:
+            for veh_id in self._edge_vehicle_ids(traci, edge):
+                ttc = self.env.compute_ttc(veh_id)
+                if ttc is not None and ttc < self.config.TTC_THRESHOLD:
+                    counts["total"] += 1
+                    if edge == self.config.E4_EDGE:
+                        counts["e4"] += 1
+                    if edge in self.config.E1_E3_EDGES:
+                        counts["e1_e3"] += 1
+        return counts
+
+    @staticmethod
+    def _aggregate_eval_metrics(runs):
+        keys = [
+            "mean_reward",
+            "total_travel_time",
+            "co2_emission",
+            "ttc_total",
+            "ttc_e4",
+            "e4_mean_speed",
+            "ttc_e1_e3",
+            "e1_e3_mean_speed",
+            "avg_vsl",
+        ]
+        return {key: float(np.mean([run[key] for run in runs])) for key in keys}
+
+    @staticmethod
+    def _print_eval_summary(label, metrics):
+        print(f"  [{label}]")
+        print(f"    Total travel time E1-E6: {metrics['total_travel_time']:.1f} s")
+        print(f"    CO2 emission:            {metrics['co2_emission']:.1f} mg")
+        print(f"    TTC<3s total:            {metrics['ttc_total']:.1f}")
+        print(f"    TTC<3s E4:               {metrics['ttc_e4']:.1f}")
+        print(f"    Mean speed E4:           {metrics['e4_mean_speed']:.2f} m/s")
+        print(f"    TTC<3s E1-E3:            {metrics['ttc_e1_e3']:.1f}")
+        print(f"    Mean speed E1-E3:        {metrics['e1_e3_mean_speed']:.2f} m/s")
+        print(f"    Avg VSL:                 {metrics['avg_vsl']:.2f} m/s")
 
     # ================================================================
     # Plotting
     # ================================================================
 
     def plot_results(self, save_dir=None):
-        """Generate and save training result plots."""
         import matplotlib
-        matplotlib.use('Agg')
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
         if save_dir is None:
@@ -308,159 +340,96 @@ class SACVSLTrainer:
         os.makedirs(save_dir, exist_ok=True)
         name = self.scenario_name
 
-        # --- Reward curve ---
+        episodes = np.arange(1, len(self.episode_rewards) + 1)
+
         fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-        rewards = np.array(self.episode_rewards)
-        episodes = np.arange(1, len(rewards) + 1)
-        ax.plot(episodes, rewards, 'b-', alpha=0.3, label='Episode Reward')
+        rewards = np.asarray(self.episode_rewards)
+        ax.plot(episodes, rewards, "b-", alpha=0.3, label="Episode Reward")
         if len(rewards) >= 10:
-            kernel = np.ones(10) / 10
-            smooth = np.convolve(rewards, kernel, mode='valid')
-            ax.plot(episodes[:len(smooth)], smooth, 'r-', linewidth=2, label='Smoothed (MA10)')
-        ax.set_xlabel('Episode')
-        ax.set_ylabel('Total Reward')
-        ax.set_title(f'Training Reward — {name} (CAV={self.cav_rate:.0%})')
+            smooth = np.convolve(rewards, np.ones(10) / 10, mode="valid")
+            ax.plot(episodes[:len(smooth)], smooth, "r-", linewidth=2, label="MA10")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Total Reward")
+        ax.set_title(f"Training Reward - {name} (CAV={self.cav_rate:.0%})")
         ax.legend()
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
-        fig.savefig(os.path.join(save_dir, f'reward_curve_{name}.png'), dpi=150)
+        fig.savefig(os.path.join(save_dir, f"reward_curve_{name}.png"), dpi=150)
         plt.close(fig)
 
-        # --- Loss & alpha curve ---
         fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
-        axes[0].plot(episodes, self.actor_losses, 'b-', alpha=0.3)
-        if len(self.actor_losses) >= 5:
-            smooth_al = np.convolve(self.actor_losses, np.ones(5)/5, mode='valid')
-            axes[0].plot(episodes[:len(smooth_al)], smooth_al, 'b-', linewidth=2)
-        axes[0].set_ylabel('Actor Loss')
-        axes[0].grid(True, alpha=0.3)
-
-        axes[1].plot(episodes, self.critic_losses, 'r-', alpha=0.3)
-        if len(self.critic_losses) >= 5:
-            smooth_cl = np.convolve(self.critic_losses, np.ones(5)/5, mode='valid')
-            axes[1].plot(episodes[:len(smooth_cl)], smooth_cl, 'r-', linewidth=2)
-        axes[1].set_ylabel('Critic Loss')
-        axes[1].grid(True, alpha=0.3)
-
-        axes[2].plot(episodes, self.alphas, 'g-', linewidth=2)
-        axes[2].set_xlabel('Episode')
-        axes[2].set_ylabel('Alpha (entropy coeff)')
-        axes[2].grid(True, alpha=0.3)
-
-        fig.suptitle(f'Loss & Alpha — {name} (CAV={self.cav_rate:.0%})')
+        axes[0].plot(episodes, self.actor_losses, "b-", alpha=0.5)
+        axes[0].set_ylabel("Actor Loss")
+        axes[1].plot(episodes, self.critic_losses, "r-", alpha=0.5)
+        axes[1].set_ylabel("Critic Loss")
+        axes[2].plot(episodes, self.alphas, "g-", linewidth=2)
+        axes[2].set_xlabel("Episode")
+        axes[2].set_ylabel("Alpha")
+        for ax in axes:
+            ax.grid(True, alpha=0.3)
         fig.tight_layout()
-        fig.savefig(os.path.join(save_dir, f'loss_curve_{name}.png'), dpi=150)
+        fig.savefig(os.path.join(save_dir, f"loss_curve_{name}.png"), dpi=150)
         plt.close(fig)
 
-        # --- VSL policy curve ---
-        vsl = np.array(self.vsl_history)
         fig, ax = plt.subplots(figsize=(10, 5))
-        if len(vsl) > 0:
-            ax.plot(episodes, vsl[:, 0], 'r-', label='E1 VSL', linewidth=1.5)
-            ax.plot(episodes, vsl[:, 1], 'g-', label='E2 VSL', linewidth=1.5)
-            ax.plot(episodes, vsl[:, 2], 'b-', label='E3 VSL', linewidth=1.5)
-            ax.axhline(y=22.22, color='gray', linestyle='--', alpha=0.5, label='80 km/h limit')
-            ax.axhline(y=8.33, color='gray', linestyle=':', alpha=0.5, label='30 km/h min')
-        ax.set_xlabel('Episode')
-        ax.set_ylabel('VSL (m/s)')
-        ax.set_title(f'VSL Policy Evolution — {name} (CAV={self.cav_rate:.0%})')
+        if self.vsl_history:
+            vsl = np.asarray(self.vsl_history)
+            ax.plot(episodes, vsl, "b-", label="Unified E1-E3 VSL", linewidth=1.5)
+            ax.axhline(y=self.config.VSL_MAX, color="gray", linestyle="--", alpha=0.5, label="120 km/h")
+            ax.axhline(y=self.config.VSL_MIN, color="gray", linestyle=":", alpha=0.5, label="60 km/h")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("VSL (m/s)")
+        ax.set_title(f"VSL Policy Evolution - {name} (CAV={self.cav_rate:.0%})")
         ax.legend()
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
-        fig.savefig(os.path.join(save_dir, f'vsl_policy_{name}.png'), dpi=150)
+        fig.savefig(os.path.join(save_dir, f"vsl_policy_{name}.png"), dpi=150)
         plt.close(fig)
 
         print(f"  -> Plots saved to {save_dir}")
 
     @staticmethod
     def plot_comparison(all_metrics, save_dir=None):
-        """Generate cross-scenario comparison bar chart."""
         import matplotlib
-        matplotlib.use('Agg')
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
         if save_dir is None:
             save_dir = os.path.join("results")
         os.makedirs(save_dir, exist_ok=True)
 
-        labels = []
-        cav_rates = []
-        rewards = []
-        ttc_vals = []
-        speeds = []
-        travel_times = []
-        vsl_e1, vsl_e2, vsl_e3 = [], [], []
+        labels = [m["scenario"] for m in all_metrics]
+        rl_tt = [m["rl"]["total_travel_time"] for m in all_metrics]
+        base_tt = [m["baseline"]["total_travel_time"] for m in all_metrics]
+        rl_co2 = [m["rl"]["co2_emission"] for m in all_metrics]
+        base_co2 = [m["baseline"]["co2_emission"] for m in all_metrics]
+        rl_ttc = [m["rl"]["ttc_total"] for m in all_metrics]
+        base_ttc = [m["baseline"]["ttc_total"] for m in all_metrics]
 
-        for m in all_metrics:
-            labels.append(m['scenario'])
-            cav_rates.append(m['cav_rate'])
-            rewards.append(m['mean_reward'])
-            ttc_vals.append(m['mean_ttc_violations'])
-            speeds.append(m['mean_speed'])
-            travel_times.append(m['mean_travel_time'])
-            vsl_e1.append(m['avg_vsl_E1'])
-            vsl_e2.append(m['avg_vsl_E2'])
-            vsl_e3.append(m['avg_vsl_E3'])
-
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-        colors = plt.cm.Blues(np.linspace(0.4, 0.9, len(labels)))
-
-        def bar(ax, vals, title, ylabel, fmt='.2f'):
-            bars = ax.bar(labels, vals, color=colors)
-            for bar_, v in zip(bars, vals):
-                ax.text(bar_.get_x() + bar_.get_width()/2, bar_.get_height(),
-                        f'{v:{fmt}}', ha='center', va='bottom', fontsize=9)
+        x = np.arange(len(labels))
+        width = 0.35
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        for ax, rl_vals, base_vals, title, ylabel in [
+            (axes[0], rl_tt, base_tt, "Total Travel Time E1-E6", "s"),
+            (axes[1], rl_co2, base_co2, "CO2 Emission", "mg"),
+            (axes[2], rl_ttc, base_ttc, "TTC<3s Total", "count"),
+        ]:
+            ax.bar(x - width / 2, rl_vals, width, label="RL")
+            ax.bar(x + width / 2, base_vals, width, label="Baseline")
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels)
             ax.set_title(title)
             ax.set_ylabel(ylabel)
-            ax.grid(True, alpha=0.3, axis='y')
-
-        bar(axes[0, 0], rewards, 'Mean Reward', 'Reward')
-        bar(axes[0, 1], ttc_vals, 'TTC Violations (<3s)', 'Count')
-        bar(axes[0, 2], speeds, 'Average Speed', 'm/s')
-
-        # Travel time with free-flow reference
-        axes[1, 0].bar(labels, travel_times, color=colors)
-        axes[1, 0].axhline(y=90.0, color='r', linestyle='--', alpha=0.6, label='Free-flow (90s)')
-        for i, v in enumerate(travel_times):
-            axes[1, 0].text(i, v, f'{v:.1f}s', ha='center', va='bottom', fontsize=9)
-        axes[1, 0].set_title('Mean Travel Time (E1-E5)')
-        axes[1, 0].set_ylabel('Seconds')
-        axes[1, 0].legend()
-        axes[1, 0].grid(True, alpha=0.3, axis='y')
-
-        # VSL bars grouped
-        x = np.arange(len(labels))
-        width = 0.25
-        axes[1, 1].bar(x - width, vsl_e1, width, label='E1', color='#e74c3c')
-        axes[1, 1].bar(x, vsl_e2, width, label='E2', color='#2ecc71')
-        axes[1, 1].bar(x + width, vsl_e3, width, label='E3', color='#3498db')
-        axes[1, 1].set_xticks(x)
-        axes[1, 1].set_xticklabels(labels)
-        axes[1, 1].set_title('Average VSL by Edge')
-        axes[1, 1].set_ylabel('VSL (m/s)')
-        axes[1, 1].legend()
-        axes[1, 1].grid(True, alpha=0.3, axis='y')
-
-        # CAV rate info
-        axes[1, 2].axis('off')
-
+            ax.grid(True, alpha=0.3, axis="y")
+            ax.legend()
         fig.tight_layout()
-        fig.savefig(os.path.join(save_dir, 'scenario_comparison.png'), dpi=150)
+        fig.savefig(os.path.join(save_dir, "scenario_comparison.png"), dpi=150)
         plt.close(fig)
-
         print(f"  -> Comparison plot saved to {save_dir}")
 
-
-# ================================================================
-# Standalone test
-# ================================================================
 
 if __name__ == "__main__":
     import config as cfg
 
-    print("Testing SACVSLTrainer with a single episode (no training)...")
     trainer = SACVSLTrainer(cfg, "cav100", gui=False)
-
-    # Run one evaluation episode to verify everything connects
-    metrics = trainer.evaluate(num_episodes=1)
-    print("\nTest complete!")
+    trainer.evaluate(num_episodes=1)
