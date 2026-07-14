@@ -328,32 +328,71 @@ class SumoVSLEnv:
             speed_norm = 0.0
 
         if self._reward_ttc_values:
-            ttc_risk = float(np.mean(self._reward_ttc_values)) / self.config.TTC_THRESHOLD
+            ttc_values = np.asarray(self._reward_ttc_values, dtype=np.float32)
+            normalized_ttc_shortfall = (
+                self.config.TTC_THRESHOLD - ttc_values
+            ) / self.config.TTC_THRESHOLD
+            ttc_penalty = float(np.mean(normalized_ttc_shortfall**2))
         else:
-            ttc_risk = 0.0
+            ttc_penalty = 0.0
 
-        return speed_norm - ttc_risk
+        return speed_norm - ttc_penalty
 
-    def compute_ttc(self, veh_id):
-        """Compute Time-To-Collision for a vehicle; return None if no risk."""
+    def compute_ttc_diagnostics(self, veh_id):
+        """Compute TTC and expose why a vehicle is or is not counted as risky."""
+        result = {
+            "leader_found": False,
+            "closing": False,
+            "ttc": None,
+            "ttc_lt_3": False,
+            "ttc_lt_5": False,
+            "ttc_lt_10": False,
+            "gap": None,
+            "ego_speed": None,
+            "lead_speed": None,
+            "speed_diff": None,
+        }
+
         try:
             leader = traci.vehicle.getLeader(veh_id, self.config.TTC_LOOKAHEAD)
         except Exception:
-            return None
+            return result
         if leader is None:
-            return None
+            return result
 
         leader_id, gap = leader
+        result["leader_found"] = True
+        result["gap"] = float(gap)
         if gap <= 0:
-            return 0.0
+            result["closing"] = True
+            result["ttc"] = 0.0
+            result["ttc_lt_3"] = True
+            result["ttc_lt_5"] = True
+            result["ttc_lt_10"] = True
+            return result
 
         try:
             ego_speed = traci.vehicle.getSpeed(veh_id)
             lead_speed = traci.vehicle.getSpeed(leader_id)
         except Exception:
-            return None
+            return result
+
+        result["ego_speed"] = float(ego_speed)
+        result["lead_speed"] = float(lead_speed)
 
         speed_diff = ego_speed - lead_speed
+        result["speed_diff"] = float(speed_diff)
         if speed_diff <= 0:
-            return None
-        return gap / speed_diff
+            return result
+
+        ttc = float(gap / speed_diff)
+        result["closing"] = True
+        result["ttc"] = ttc
+        result["ttc_lt_3"] = ttc < 3.0
+        result["ttc_lt_5"] = ttc < 5.0
+        result["ttc_lt_10"] = ttc < 10.0
+        return result
+
+    def compute_ttc(self, veh_id):
+        """Compute Time-To-Collision for a vehicle; return None if no risk."""
+        return self.compute_ttc_diagnostics(veh_id)["ttc"]
